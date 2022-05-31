@@ -90,7 +90,7 @@ def getRgbd():
             depthEvent = qdepth.get()
             leftImg = leftEvent.getCvFrame()
             depthImg = depthEvent.getCvFrame()
-            depthImg = depthImg.astype(np.float32)/1000.0f
+            depthImg = depthImg.astype(np.float32)/1000.0
             yield leftImg, depthImg, intrinsics
 
 
@@ -112,7 +112,10 @@ def main():
     cur_transform = np.eye(4)
     prev_frame = None
     calib_mat = np.eye(3)
-    odo = cv2.rgbd.RgbdICPOdometry()
+    # pprint(dir(cv2.rgbd))
+#    odo = cv2.rgbd_RgbdICPOdometry()
+    odo = cv2.rgbd.RgbdICPOdometry_create()
+    odo.setTransformType(cv2.rgbd.ODOMETRY_RIGID_BODY_MOTION)
     odo.setMaxDepth(32.0)
     odo.setMinDepth(0.001)
     # return
@@ -123,7 +126,7 @@ def main():
         mask = computeMask(depthImg)
         if(prev_frame == None):
             prev_frame = (leftImg, depthImg, mask)
-            odo.setCameraMatrix(intrin)
+            odo.setCameraMatrix(np.array(intrin))
             continue
         dispLD(leftImg, depthImg, mask)
 
