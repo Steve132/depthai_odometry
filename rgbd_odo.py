@@ -3,6 +3,9 @@
 import cv2
 import depthai as dai
 import numpy as np
+from pprint import pprint
+
+# https: // docs.luxonis.com/projects/api/en/latest/samples/calibration/calibration_reader/
 
 
 def getRgbd():
@@ -17,7 +20,7 @@ def getRgbd():
     # Create pipeline
     pipeline = dai.Pipeline()
 
-    # Define sources and outputs
+    # Define sources and outputswell
     monoLeft = pipeline.create(dai.node.MonoCamera)
     monoRight = pipeline.create(dai.node.MonoCamera)
     stereo = pipeline.create(dai.node.StereoDepth)
@@ -44,12 +47,17 @@ def getRgbd():
     if(confidenceThreshold):
         stereo.initialConfig.setConfidenceThreshold(confidenceThreshold)
     stereo.initialConfig.setMedianFilter(dai.MedianFilter.KERNEL_5x5)
+    stereo.initialConfig.setDepthAlign(
+        dai.RawStereoDepthConfig.AlgorithmControl.DepthAlign.RECTIFIED_LEFT)
+    stereo.setRectification(True)
+    stereo.setRectifyEdgeFillColor(0)
     # Options: MEDIAN_OFF, KERNEL_3x3, KERNEL_5x5, KERNEL_7x7 (default)
     stereo.setLeftRightCheck(lr_check)
     stereo.setExtendedDisparity(extended_disparity)
     stereo.setSubpixel(subpixel)
 
     config = stereo.initialConfig.get()
+
     config.postProcessing.speckleFilter.enable = False
     config.postProcessing.speckleFilter.speckleRange = 50
     config.postProcessing.temporalFilter.enable = False
@@ -71,23 +79,53 @@ def getRgbd():
     with dai.Device(pipeline) as device:
         qleft = device.getOutputQueue(name="left", maxSize=2, blocking=False)
         qdepth = device.getOutputQueue(name="depth", maxSize=2, blocking=False)
+
+        calibData = device.readCalibration()
+        intrinsics = calibData.getCameraIntrinsics(
+            dai.CameraBoardSocket.LEFT, 640, 400)
+        pprint(intrinsics)
+
         while True:
             leftEvent = qleft.get()
             depthEvent = qdepth.get()
             leftImg = leftEvent.getCvFrame()
             depthImg = depthEvent.getCvFrame()
-            mx, depthImg = cv2.threshold(depthImg, thresh=6000,
-                                         maxval=16000, type=cv2.THRESH_TRUNC)
-            depthImg *= ((1 << 16) // 6000)
-            yield leftImg, depthImg
+            depthImg = depthImg.astype(np.float32)/1000.0f
+            yield leftImg, depthImg, intrinsics
 
 
-def dispLD(leftImg, depthImg):
+def computeMask(depthImg):
+    return np.array(depthImg != 0, dtype=np.uint8)
+
+
+def dispLD(leftImg, depthImg, mask):
+    # mx, depthImg = cv2.threshold(depthImg, thresh=6000,
+    #                             maxval=16000, type=cv2.THRESH_TRUNC)
+    #depthImg *= ((1 << 16) // 6000)
     cv2.imshow("left", leftImg)
     cv2.imshow("depth", depthImg)
+    cv2.imshow("mask", mask)
     return cv2.waitKey(1) != ord('q')
 
 
-for leftImg, depthImg in getRgbd():
-    if(not dispLD(leftImg, depthImg)):
-        break
+def main():
+    cur_transform = np.eye(4)
+    prev_frame = None
+    calib_mat = np.eye(3)
+    odo = cv2.rgbd.RgbdICPOdometry()
+    odo.setMaxDepth(32.0)
+    odo.setMinDepth(0.001)
+    # return
+
+    rgbd_stream = getRgbd()
+
+    for leftImg, depthImg, intrin in getRgbd():
+        mask = computeMask(depthImg)
+        if(prev_frame == None):
+            prev_frame = (leftImg, depthImg, mask)
+            odo.setCameraMatrix(intrin)
+            continue
+        dispLD(leftImg, depthImg, mask)
+
+
+main()
