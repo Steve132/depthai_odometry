@@ -3,6 +3,7 @@
 import cv2
 import depthai as dai
 import numpy as np
+import json
 from pprint import pprint
 
 # https: // docs.luxonis.com/projects/api/en/latest/samples/calibration/calibration_reader/
@@ -19,6 +20,17 @@ def getRgbd():
     confidenceThreshold = None  # 200
     # Create pipeline
     pipeline = dai.Pipeline()
+
+    useImu = False
+    if(useImu):
+        imu = pipeline.create(dai.node.IMU)
+        imu_xout = pipeline.create(dai.node.XLinkOut)
+        imu_xout.setStreamName("imu")
+        imu.enableIMUSensor(dai.IMUSensor.ROTATION_VECTOR, 120)
+        imu.enableIMUSensor(dai.IMUSensor.LINEAR_ACCELERATION, 120)
+        imu.setBatchReportThreshold(1)
+        imu.setMaxBatchReports(10)
+        imu.out.link(imu_xout.input)
 
     # Define sources and outputswell
     monoLeft = pipeline.create(dai.node.MonoCamera)
@@ -79,6 +91,8 @@ def getRgbd():
     with dai.Device(pipeline) as device:
         qleft = device.getOutputQueue(name="left", maxSize=2, blocking=False)
         qdepth = device.getOutputQueue(name="depth", maxSize=2, blocking=False)
+        if(useImu):
+            qimu = device.getOutputQueue(name="imu", maxSize=2, blocking=False)
 
         calibData = device.readCalibration()
         intrinsics = calibData.getCameraIntrinsics(
@@ -88,9 +102,19 @@ def getRgbd():
         while True:
             leftEvent = qleft.get()
             depthEvent = qdepth.get()
+
+            if(useImu):
+                imuEvent = qimu.get()
+                imuPacket = imuEvent.packets[-1]
+                rot = imuPacket.rotationVector
+                acc = imuPacket.imuPacket.acceleroMeter
+                print(rot)
+                print(acc)
+
             leftImg = leftEvent.getCvFrame()
             depthImg = depthEvent.getCvFrame()
             depthImg = depthImg.astype(np.float32)/1000.0
+
             yield leftImg, depthImg, intrinsics
 
 
@@ -101,7 +125,7 @@ def computeMask(depthImg):
 def dispLD(leftImg, depthImg, mask):
     # mx, depthImg = cv2.threshold(depthImg, thresh=6000,
     #                             maxval=16000, type=cv2.THRESH_TRUNC)
-    #depthImg *= ((1 << 16) // 6000)
+    # depthImg *= ((1 << 16) // 6000)
     cv2.imshow("left", leftImg)
     cv2.imshow("depth", depthImg)
     cv2.imshow("mask", mask)
@@ -111,7 +135,6 @@ def dispLD(leftImg, depthImg, mask):
 def main():
     cur_transform = np.eye(4)
     prev_frame = None
-    calib_mat = np.eye(3)
     # pprint(dir(cv2.rgbd))
 #    odo = cv2.rgbd_RgbdICPOdometry()
     odo = cv2.rgbd.RgbdICPOdometry_create()
@@ -119,7 +142,6 @@ def main():
     odo.setMaxDepth(32.0)
     odo.setMinDepth(0.001)
     # return
-
     rgbd_stream = getRgbd()
 
     for leftImg, depthImg, intrin in getRgbd():
@@ -129,6 +151,13 @@ def main():
             odo.setCameraMatrix(np.array(intrin))
             continue
         dispLD(leftImg, depthImg, mask)
+        found, tform = odo.compute(leftImg, depthImg, mask,
+                                   prev_frame[0], prev_frame[1], prev_frame[2])
+
+        if(found):
+            cur_transform = cur_transform @ tform
+            print(json.dumps(list([list(x) for x in cur_transform])))
+            prev_frame = (leftImg, depthImg, mask)
 
 
 main()
