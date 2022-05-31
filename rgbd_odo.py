@@ -97,7 +97,7 @@ def getRgbd():
         calibData = device.readCalibration()
         intrinsics = calibData.getCameraIntrinsics(
             dai.CameraBoardSocket.LEFT, 640, 400)
-        pprint(intrinsics)
+        # pprint(intrinsics)
 
         while True:
             leftEvent = qleft.get()
@@ -150,7 +150,7 @@ def main():
             prev_frame = (leftImg, depthImg, mask)
             odo.setCameraMatrix(np.array(intrin))
             continue
-        dispLD(leftImg, depthImg, mask)
+        #dispLD(leftImg, depthImg, mask)
         found, tform = odo.compute(leftImg, depthImg, mask,
                                    prev_frame[0], prev_frame[1], prev_frame[2])
 
